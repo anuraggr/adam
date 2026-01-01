@@ -5,31 +5,37 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
+
+	"adam/ui"
 )
 
-func downloadPartWithRetry(url string, id int, start, end int64) bool {
+var workerBytesReceived = make(map[int]*int64)
+
+func downloadPartWithRetry(url string, id int, start, end int64, model *ui.Model) bool {
 	filename := fmt.Sprintf("part_%d.tmp", id)
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		fmt.Printf("[Worker %d] Attempt %d/%d: Bytes %d-%d\n", id, attempt, maxRetries, start, end)
+	var received int64
+	workerBytesReceived[id] = &received
 
-		err := downloadChunk(url, start, end, filename)
+	model.RegisterWorker(id, start, end)
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := downloadChunk(url, start, end, filename, id, model)
 		if err == nil {
-			// success
-			fmt.Printf("[Worker %d] Finished! Saved to %s\n", id, filename)
 			return true
 		}
 
-		// failure
-		fmt.Printf("[Worker %d] Error: %v. Retrying in 1s...\n", id, err)
-		time.Sleep(1 * time.Second) // backoff
+		if attempt < maxRetries {
+			time.Sleep(1 * time.Second) // backoff
+		}
 	}
 
 	return false
 }
 
-func downloadChunk(url string, start, end int64, filename string) error {
+func downloadChunk(url string, start, end int64, filename string, workerID int, model *ui.Model) error {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	req.Header.Set("User-Agent", "Adam/1.0")
@@ -45,13 +51,38 @@ func downloadChunk(url string, start, end int64, filename string) error {
 		return fmt.Errorf("server returned unexpected status: %s", resp.Status)
 	}
 
-	// write to file
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, resp.Body)
-	return err
+	buf := make([]byte, 32*1024)
+	var totalReceived int64
+
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			_, writeErr := file.Write(buf[:n])
+			if writeErr != nil {
+				return writeErr
+			}
+			totalReceived += int64(n)
+
+			model.UpdateWorkerProgress(workerID, totalReceived)
+
+			if counter, ok := workerBytesReceived[workerID]; ok {
+				atomic.StoreInt64(counter, totalReceived)
+			}
+		}
+
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+
+	return nil
 }
