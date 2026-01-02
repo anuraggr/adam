@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 	"adam/ui"
 )
 
-func downloadPartWithRetry(url string, part *Part, model *ui.Model) bool {
+var ErrLinkExpired = errors.New("link expired")
+
+func downloadPartWithRetry(url string, part *Part, model *ui.Model) error {
 	filename := fmt.Sprintf("part_%d.tmp", part.ID)
 
 	model.RegisterWorker(part.ID, part.Start, part.End)
@@ -18,7 +21,12 @@ func downloadPartWithRetry(url string, part *Part, model *ui.Model) bool {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		err := downloadChunk(url, part, filename, model)
 		if err == nil {
-			return true
+			return nil
+		}
+
+		// don't retry if link expired
+		if errors.Is(err, ErrLinkExpired) {
+			return err
 		}
 
 		if attempt < maxRetries {
@@ -26,26 +34,43 @@ func downloadPartWithRetry(url string, part *Part, model *ui.Model) bool {
 		}
 	}
 
-	return false
+	return fmt.Errorf("worker %d failed after %d retries", part.ID, maxRetries)
 }
 
 func downloadChunk(url string, part *Part, filename string, model *ui.Model) error {
 	mode := os.O_CREATE | os.O_WRONLY
 	startByte := part.Start
 
-	info, err := os.Stat(filename)
-	if err == nil {
-		//file exists
-		downloadedSoFar := info.Size()
+	// resume from curOffset if we have progress
+	if part.CurrentOffset > 0 {
+		expectedSize := part.CurrentOffset
+		info, err := os.Stat(filename)
 
-		if downloadedSoFar >= (part.End - part.Start + 1) {
-			part.IsComplete = true
-			return nil
+		// check if temp matches expected progress
+		if err == nil && info.Size() >= expectedSize {
+			if part.CurrentOffset >= (part.End - part.Start + 1) {
+				part.IsComplete = true
+				return nil
+			}
+
+			if info.Size() > expectedSize {
+				if truncErr := os.Truncate(filename, expectedSize); truncErr != nil {
+					// start fresh if truncate faisl
+					part.CurrentOffset = 0
+					mode = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+				} else {
+					startByte = part.Start + part.CurrentOffset
+					mode = os.O_APPEND | os.O_WRONLY
+				}
+			} else {
+				startByte = part.Start + part.CurrentOffset
+				mode = os.O_APPEND | os.O_WRONLY
+			}
+		} else {
+			// start fresh, tmp doesnt match expected progress
+			part.CurrentOffset = 0
+			mode = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 		}
-
-		startByte = part.Start + downloadedSoFar
-		part.CurrentOffset = downloadedSoFar
-		mode = os.O_APPEND | os.O_WRONLY
 	}
 
 	req, _ := http.NewRequest("GET", url, nil)
@@ -58,6 +83,10 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("%w: update download link with 'adam update'", ErrLinkExpired)
+	}
 
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned unexpected status: %s", resp.Status)

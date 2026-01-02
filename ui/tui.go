@@ -102,7 +102,6 @@ func (m *Model) updateChunksFromWorkers() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Reset chunk
 	for i := range m.chunkStatus {
 		m.chunkStatus[i] = false
 	}
@@ -193,7 +192,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.err = msg.Error
 		m.mu.Unlock()
-		return m, tea.Quit
+		return m, nil //so we should not quit imediately. error needs to be seen by user right
 
 	case TickMsg:
 		m.updateChunksFromWorkers()
@@ -270,6 +269,7 @@ func (m *Model) View() string {
 
 	if err != nil {
 		b.WriteString(fmt.Sprintf("\n❌ Error: %v\n", err))
+		b.WriteString("Press 'q' to quit\n")
 	} else if done {
 		b.WriteString("\n")
 		b.WriteString(DoneStyle.Render("✅ Download complete!"))

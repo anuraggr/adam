@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,19 +18,67 @@ const maxRetries = 3
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <url>")
+		fmt.Println("Usage: adam <url> | adam resume <filename> | adam ls")
 		return
 	}
-	url := os.Args[1]
+	command := os.Args[1]
+	var url string
+	var isResume bool
 
-	outFileName := filepath.Base(url)
+	switch command {
+	case "ls", "list":
+		listSessions()
+		return
 
-	statePath := getStatePath(outFileName)
+	case "update":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: adam update <filename> <new_url>")
+			return
+		}
+		updateSessionUrl(os.Args[2], os.Args[3])
+		return
 
-	state, err := LoadState(statePath)
+	case "resume":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: adam resume <filename>")
+			return
+		}
+		isResume = true
+
+	default:
+		url = os.Args[1]
+	}
+
+	var state *DownloadState
 	var totalSize int64
+	var outFileName string
+	var statePath string
+	var err error
 
-	if err != nil {
+	if isResume {
+		outFileName = os.Args[2]
+		statePath = getStatePath(outFileName)
+
+		state, err = LoadState(statePath)
+		if err != nil {
+			fmt.Printf("Error: No session found for '%s'\n", outFileName)
+			return
+		}
+		url = state.URL
+		totalSize = state.TotalSize
+		numWorkers = len(state.Parts)
+		fmt.Printf("Resuming download: %s\n", outFileName)
+	} else {
+		//fresh download
+		outFileName = filepath.Base(url)
+		statePath = getStatePath(outFileName)
+
+		//remove any existing state and tmp for this file
+		os.Remove(statePath + ".json")
+		for i := 0; i < 10; i++ { //10 for now. might need to check and delete later
+			os.Remove(fmt.Sprintf("part_%d.tmp", i))
+		}
+
 		totalSize, err = checkServerSupport(url)
 		if err == ErrNoRangeSupport {
 			fmt.Println("Server does not support range requests. Falling back to a single worker.")
@@ -63,9 +112,6 @@ func main() {
 			}
 		}
 		SaveState(statePath, state)
-	} else {
-		totalSize = state.TotalSize
-		numWorkers = len(state.Parts)
 	}
 
 	model := ui.New(outFileName, totalSize)
@@ -110,10 +156,16 @@ func main() {
 			go func(p *Part) {
 				defer wg.Done()
 
-				success := downloadPartWithRetry(url, p, model)
-				if !success {
+				err := downloadPartWithRetry(url, p, model)
+				if err != nil {
 					errMu.Lock()
-					downloadErr = fmt.Errorf("worker %d failed after %d retries", p.ID, maxRetries)
+					if downloadErr == nil {
+						downloadErr = err
+					}
+					// check if link expired
+					if errors.Is(err, ErrLinkExpired) {
+						downloadErr = err
+					}
 					errMu.Unlock()
 				} else {
 					p.IsComplete = true
