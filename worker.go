@@ -5,24 +5,18 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"adam/ui"
 )
 
-var workerBytesReceived = make(map[int]*int64)
+func downloadPartWithRetry(url string, part *Part, model *ui.Model) bool {
+	filename := fmt.Sprintf("part_%d.tmp", part.ID)
 
-func downloadPartWithRetry(url string, id int, start, end int64, model *ui.Model) bool {
-	filename := fmt.Sprintf("part_%d.tmp", id)
-
-	var received int64
-	workerBytesReceived[id] = &received
-
-	model.RegisterWorker(id, start, end)
+	model.RegisterWorker(part.ID, part.Start, part.End)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := downloadChunk(url, start, end, filename, id, model)
+		err := downloadChunk(url, part, filename, model)
 		if err == nil {
 			return true
 		}
@@ -35,9 +29,27 @@ func downloadPartWithRetry(url string, id int, start, end int64, model *ui.Model
 	return false
 }
 
-func downloadChunk(url string, start, end int64, filename string, workerID int, model *ui.Model) error {
+func downloadChunk(url string, part *Part, filename string, model *ui.Model) error {
+	mode := os.O_CREATE | os.O_WRONLY
+	startByte := part.Start
+
+	info, err := os.Stat(filename)
+	if err == nil {
+		//file exists
+		downloadedSoFar := info.Size()
+
+		if downloadedSoFar >= (part.End - part.Start + 1) {
+			part.IsComplete = true
+			return nil
+		}
+
+		startByte = part.Start + downloadedSoFar
+		part.CurrentOffset = downloadedSoFar
+		mode = os.O_APPEND | os.O_WRONLY
+	}
+
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", startByte, part.End))
 	req.Header.Set("User-Agent", "Adam/1.0")
 
 	client := &http.Client{}
@@ -51,15 +63,13 @@ func downloadChunk(url string, start, end int64, filename string, workerID int, 
 		return fmt.Errorf("server returned unexpected status: %s", resp.Status)
 	}
 
-	file, err := os.Create(filename)
+	file, err := os.OpenFile(filename, mode, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
 	buf := make([]byte, 32*1024)
-	var totalReceived int64
-
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
@@ -67,16 +77,13 @@ func downloadChunk(url string, start, end int64, filename string, workerID int, 
 			if writeErr != nil {
 				return writeErr
 			}
-			totalReceived += int64(n)
+			part.CurrentOffset += int64(n)
 
-			model.UpdateWorkerProgress(workerID, totalReceived)
-
-			if counter, ok := workerBytesReceived[workerID]; ok {
-				atomic.StoreInt64(counter, totalReceived)
-			}
+			model.UpdateWorkerProgress(part.ID, part.CurrentOffset)
 		}
 
 		if readErr == io.EOF {
+			part.IsComplete = true
 			break
 		}
 		if readErr != nil {

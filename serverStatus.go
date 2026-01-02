@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 )
+
+var ErrNoRangeSupport = errors.New("server does not support range requests")
 
 func checkServerSupport(url string) (int64, error) {
 	req, _ := http.NewRequest("GET", url, nil)
@@ -26,5 +29,9 @@ func checkServerSupport(url string) (int64, error) {
 			return size, nil
 		}
 	}
-	return 0, fmt.Errorf("server does not support parallel downloads")
+
+	if resp.StatusCode == http.StatusOK {
+		return 0, ErrNoRangeSupport
+	}
+	return 0, fmt.Errorf("server returned unexpected status: %s", resp.Status)
 }
