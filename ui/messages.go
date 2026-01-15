@@ -19,6 +19,18 @@ type ErrorMsg struct {
 
 type TickMsg struct{}
 
+type QuitMode int
+
+const (
+	QuitModeNone QuitMode = iota
+	QuitModeClean
+	QuitModeSave
+)
+
+type QuitMsg struct {
+	Mode QuitMode
+}
+
 func StartDownloadCmd(downloadFn func() tea.Msg) tea.Cmd {
 	return downloadFn
 }

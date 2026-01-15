@@ -45,6 +45,10 @@ func main() {
 		}
 		isResume = true
 
+	case "help":
+		fmt.Println("Read the code I cant be bothered to write this")
+
+		return
 	default:
 		url = os.Args[1]
 	}
@@ -198,6 +202,21 @@ func main() {
 	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error running TUI: %v\n", err)
 		os.Exit(1)
+	}
+
+	switch model.GetQuitMode() {
+	case ui.QuitModeClean:
+		// delete tmp files and session state
+		os.Remove(statePath + ".json")
+		for i := 0; i < numWorkers; i++ {
+			os.Remove(fmt.Sprintf("part_%d.tmp", i))
+		}
+		fmt.Println("Download cancelled.")
+
+	case ui.QuitModeSave:
+		// Save state, keep tmp files for resume
+		SaveState(statePath, state)
+		fmt.Printf("Download paused. Resume with: adam resume %s\n", outFileName)
 	}
 }
 

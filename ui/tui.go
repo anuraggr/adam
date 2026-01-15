@@ -29,6 +29,12 @@ type Model struct {
 	timeRemaining  time.Duration
 	progressMu     sync.RWMutex
 	workerProgress map[int]*WorkerProgress // worker id -> progress
+
+	// Pause state
+	paused   bool
+	pauseCh  chan struct{}
+	pauseMu  sync.RWMutex
+	quitMode QuitMode
 }
 
 type WorkerProgress struct {
@@ -44,6 +50,7 @@ func New(fileName string, totalSize int64) *Model {
 		rows:           defaultRows,
 		startTime:      time.Now(),
 		workerProgress: make(map[int]*WorkerProgress),
+		pauseCh:        make(chan struct{}),
 	}
 }
 
@@ -64,6 +71,53 @@ func (m *Model) UpdateWorkerProgress(id int, received int64) {
 	if wp, ok := m.workerProgress[id]; ok {
 		wp.Received = received
 	}
+}
+
+func (m *Model) Pause() {
+	m.pauseMu.Lock()
+	defer m.pauseMu.Unlock()
+	if !m.paused {
+		m.paused = true
+		m.pauseCh = make(chan struct{})
+	}
+}
+
+func (m *Model) Resume() {
+	m.pauseMu.Lock()
+	defer m.pauseMu.Unlock()
+	if m.paused {
+		m.paused = false
+		close(m.pauseCh)
+	}
+}
+
+func (m *Model) IsPaused() bool {
+	m.pauseMu.RLock()
+	defer m.pauseMu.RUnlock()
+	return m.paused
+}
+
+func (m *Model) WaitIfPaused() {
+	m.pauseMu.RLock()
+	if m.paused {
+		ch := m.pauseCh
+		m.pauseMu.RUnlock()
+		<-ch // block until resumed
+		return
+	}
+	m.pauseMu.RUnlock()
+}
+
+func (m *Model) SetQuitMode(mode QuitMode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.quitMode = mode
+}
+
+func (m *Model) GetQuitMode() QuitMode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.quitMode
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -161,7 +215,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
+			m.SetQuitMode(QuitModeClean)
 			return m, tea.Quit
+		case "s":
+			m.SetQuitMode(QuitModeSave)
+			return m, tea.Quit
+		case "p":
+			m.Pause()
+			return m, nil
+		case "r":
+			m.Resume()
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -274,8 +338,13 @@ func (m *Model) View() string {
 		b.WriteString("\n")
 		b.WriteString(DoneStyle.Render("✅ Download complete!"))
 		b.WriteString("\n")
+	} else if m.IsPaused() {
+		b.WriteString("\n")
+		b.WriteString(PausedStyle.Render("⏸ PAUSED"))
+		b.WriteString("\n")
+		b.WriteString("Press 'r' to resume │ 's' to save & quit │ 'q' to cancel\n")
 	} else {
-		b.WriteString("\nPress 'q' to quit\n")
+		b.WriteString("\nPress 'p' to pause │ 's' to save & quit │ 'q' to cancel\n")
 	}
 
 	return b.String()

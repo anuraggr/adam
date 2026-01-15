@@ -35,6 +35,10 @@ var (
 	DoneStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#00FF00")).
 			Bold(true)
+
+	PausedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFA500")).
+			Bold(true)
 )
 
 const (

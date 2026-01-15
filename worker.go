@@ -100,6 +100,9 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 
 	buf := make([]byte, 32*1024)
 	for {
+		// check if paused before each read
+		model.WaitIfPaused()
+
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			_, writeErr := file.Write(buf[:n])
