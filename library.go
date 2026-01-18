@@ -9,30 +9,30 @@ import (
 	"adam/util"
 )
 
-func listSessions() {
-	adamDir := util.GetConfigDir()
+func listSessions(filter string) {
+	var sessions []*DownloadState
+	var sources []string
 
-	files, err := os.ReadDir(adamDir)
-	if err != nil {
-		fmt.Println("No sessions found (or error reading directory).")
+	switch filter {
+	case "ongoing":
+		sources = []string{util.GetOngoingDir()}
+	case "complete":
+		sources = []string{util.GetCompleteDir()}
+	default: // "all"
+		sources = []string{util.GetOngoingDir(), util.GetCompleteDir()}
+	}
+
+	for _, dir := range sources {
+		sessions = append(sessions, loadSessionsFromDir(dir)...)
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No sessions found.")
 		return
 	}
 
-	fmt.Printf("%-3s | %-25s | %-10s | %-8s | %s\n", "ID", "File Name", "Size", "Progress", "Last Active")
+	fmt.Printf("%-3s | %-25s | %-10s | %-8s | %s\n", "ID", "File Name", "Size", "Progress", "Status")
 	fmt.Println(strings.Repeat("-", 80))
-
-	var sessions []*DownloadState
-
-	for _, file := range files {
-		if filepath.Ext(file.Name()) == ".json" {
-			baseName := file.Name()[:len(file.Name())-5]
-			path := filepath.Join(adamDir, baseName)
-			state, err := LoadState(path)
-			if err == nil {
-				sessions = append(sessions, state)
-			}
-		}
-	}
 
 	for i, state := range sessions {
 		var downloaded int64 = 0
@@ -46,8 +46,10 @@ func listSessions() {
 		}
 
 		status := fmt.Sprintf("%.1f%%", percent)
+		statusLabel := "Ongoing"
 		if percent >= 100 {
 			status = "Done"
+			statusLabel = "Complete"
 		}
 
 		fmt.Printf("%-3d | %-25s | %-10s | %-8s | %s\n",
@@ -55,9 +57,31 @@ func listSessions() {
 			util.TruncateString(state.Filename, 25),
 			util.FormatBytes(state.TotalSize),
 			status,
-			filepath.Base(state.Filename),
+			statusLabel,
 		)
 	}
+}
+
+func loadSessionsFromDir(dir string) []*DownloadState {
+	var sessions []*DownloadState
+
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return sessions
+	}
+
+	for _, file := range files {
+		if filepath.Ext(file.Name()) == ".json" {
+			baseName := file.Name()[:len(file.Name())-5]
+			path := filepath.Join(dir, baseName)
+			state, err := LoadState(path)
+			if err == nil {
+				sessions = append(sessions, state)
+			}
+		}
+	}
+
+	return sessions
 }
 
 func updateSessionUrl(targetFile string, newUrl string) {

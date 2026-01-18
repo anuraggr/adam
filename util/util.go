@@ -52,8 +52,20 @@ func GetConfigDir() string {
 	return dir
 }
 
+func GetOngoingDir() string {
+	dir := filepath.Join(GetConfigDir(), "ongoing")
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func GetCompleteDir() string {
+	dir := filepath.Join(GetConfigDir(), "complete")
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
 func GetStatePath(filename string) string {
-	return filepath.Join(GetConfigDir(), filename)
+	return filepath.Join(GetOngoingDir(), filename)
 }
 
 func CleanupTempFiles(numWorkers int) {
@@ -62,8 +74,16 @@ func CleanupTempFiles(numWorkers int) {
 	}
 }
 
+func MoveToComplete(filename string) error {
+	src := filepath.Join(GetOngoingDir(), filename+".json")
+	dst := filepath.Join(GetCompleteDir(), filename+".json")
+
+	return os.Rename(src, dst)
+}
+
 func CleanupSession(filename string, numWorkers int) {
-	os.Remove(GetStatePath(filename) + ".json")
+	// Move the state file to complete directory instead of deleting
+	MoveToComplete(filename)
 	CleanupTempFiles(numWorkers)
 }
 

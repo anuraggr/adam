@@ -22,7 +22,16 @@ func main() {
 
 	switch command {
 	case "ls", "list":
-		listSessions()
+		filter := "all"
+		if len(os.Args) > 2 {
+			switch os.Args[2] {
+			case "-c", "--complete":
+				filter = "complete"
+			case "-o", "--ongoing":
+				filter = "ongoing"
+			}
+		}
+		listSessions(filter)
 		return
 
 	case "update":
@@ -145,6 +154,8 @@ Usage:
   adam resume <filename>       Resume a paused download
   adam update <file> <url>     Update the URL for a paused download
   adam ls                      List all download sessions
+  adam ls -o                   List ongoing downloads only
+  adam ls -c                   List completed downloads only
   adam help                    Show this help message
 
 Keyboard shortcuts (during download):
