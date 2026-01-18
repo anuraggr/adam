@@ -17,13 +17,13 @@ A high-performance CLI download manager written in Go.
 If you have Go installed, you can install `adam` directly:
 
 ~~~bash
-go install [github.com/anuraggr/adam@latest](https://github.com/anuraggr/adam@latest)
+go install github.com/anuraggr/adam@latest
 ~~~
 *Make sure your `$(go env GOPATH)/bin` is in your system `PATH`.*
 
 ### Option 2: Build from Source
 ~~~bash
-git clone [https://github.com/anuraggr/adam.git](https://github.com/anuraggr/adam.git)
+git clone https://github.com/anuraggr/adam.git
 cd adam
 go build -o adam
 ~~~
