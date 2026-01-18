@@ -13,7 +13,7 @@ import (
 
 var ErrLinkExpired = errors.New("link expired")
 
-func downloadPartWithRetry(url string, part *Part, model *ui.Model) error {
+func downloadPartWithRetry(url string, part *Part, model *ui.Model, maxRetries int) error {
 	filename := fmt.Sprintf("part_%d.tmp", part.ID)
 
 	model.RegisterWorker(part.ID, part.Start, part.End)
@@ -41,7 +41,7 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 	mode := os.O_CREATE | os.O_WRONLY
 	startByte := part.Start
 
-	// resume from curOffset if we have progress
+	// we resume from current offset if we have progress
 	if part.CurrentOffset > 0 {
 		expectedSize := part.CurrentOffset
 		info, err := os.Stat(filename)
@@ -55,7 +55,6 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 
 			if info.Size() > expectedSize {
 				if truncErr := os.Truncate(filename, expectedSize); truncErr != nil {
-					// start fresh if truncate faisl
 					part.CurrentOffset = 0
 					mode = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 				} else {
@@ -67,13 +66,16 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 				mode = os.O_APPEND | os.O_WRONLY
 			}
 		} else {
-			// start fresh, tmp doesnt match expected progress
+			// start fresh, temp doesn't match expected progress
 			part.CurrentOffset = 0
 			mode = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 		}
 	}
 
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", startByte, part.End))
 	req.Header.Set("User-Agent", "Adam/1.0")
 
@@ -98,9 +100,9 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 	}
 	defer file.Close()
 
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, 32*1024) // 32kb buffer
 	for {
-		// check if paused before each read
+		// we have to check if paused before each read
 		model.WaitIfPaused()
 
 		n, readErr := resp.Body.Read(buf)

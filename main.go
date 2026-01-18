@@ -1,20 +1,15 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"adam/ui"
+	"adam/util"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-var numWorkers = 5 // hardcode for now
-const maxRetries = 3
 
 func main() {
 	if len(os.Args) < 2 {
@@ -46,22 +41,22 @@ func main() {
 		isResume = true
 
 	case "help":
-		fmt.Println("Read the code I cant be bothered to write this")
-
+		printHelp()
 		return
+
 	default:
 		url = os.Args[1]
 	}
 
+	config := DefaultConfig()
 	var state *DownloadState
 	var totalSize int64
 	var outFileName string
-	var statePath string
 	var err error
 
 	if isResume {
 		outFileName = os.Args[2]
-		statePath = getStatePath(outFileName)
+		statePath := util.GetStatePath(outFileName)
 
 		state, err = LoadState(statePath)
 		if err != nil {
@@ -70,23 +65,20 @@ func main() {
 		}
 		url = state.URL
 		totalSize = state.TotalSize
-		numWorkers = len(state.Parts)
+		config.NumWorkers = len(state.Parts)
 		fmt.Printf("Resuming download: %s\n", outFileName)
 	} else {
-		//fresh download
+		// fresh download
 		outFileName = filepath.Base(url)
-		statePath = getStatePath(outFileName)
+		statePath := util.GetStatePath(outFileName)
 
-		//remove any existing state and tmp for this file
-		os.Remove(statePath + ".json")
-		for i := 0; i < 10; i++ { //10 for now. might need to check and delete later
-			os.Remove(fmt.Sprintf("part_%d.tmp", i))
-		}
+		// remove any existing state and tmp files for this file
+		util.CleanupSession(outFileName, 20) // 20 as max possible workers to clean
 
 		totalSize, err = checkServerSupport(url)
 		if err == ErrNoRangeSupport {
 			fmt.Println("Server does not support range requests. Falling back to a single worker.")
-			numWorkers = 1
+			config.NumWorkers = 1
 			err = nil
 		}
 		if err != nil {
@@ -98,14 +90,14 @@ func main() {
 			URL:       url,
 			Filename:  outFileName,
 			TotalSize: totalSize,
-			Parts:     make([]*Part, numWorkers),
+			Parts:     make([]*Part, config.NumWorkers),
 		}
 
-		chunkSize := totalSize / int64(numWorkers)
-		for i := 0; i < numWorkers; i++ {
+		chunkSize := totalSize / int64(config.NumWorkers)
+		for i := 0; i < config.NumWorkers; i++ {
 			start := int64(i) * chunkSize
 			end := start + chunkSize - 1
-			if i == numWorkers-1 {
+			if i == config.NumWorkers-1 {
 				end = totalSize - 1
 			}
 
@@ -121,82 +113,8 @@ func main() {
 	model := ui.New(outFileName, totalSize)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
-	var wg sync.WaitGroup
-	var downloadErr error
-	var errMu sync.Mutex
-
 	go func() {
-		go func() {
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
-
-			var lastBytes int64
-			for range ticker.C {
-				SaveState(statePath, state)
-				currentBytes := model.TotalReceived()
-				speed := float64(currentBytes-lastBytes) * 2 // bytes per second (500ms * 2)
-				lastBytes = currentBytes
-
-				var timeRemaining int64
-				if speed > 0 {
-					timeRemaining = (totalSize - currentBytes) / int64(speed)
-				}
-				program.Send(ui.SpeedMsg{BytesPerSec: speed, TimeRemaining: time.Duration(timeRemaining) * time.Second})
-
-				if currentBytes >= totalSize {
-					return
-				}
-			}
-		}()
-
-		for _, part := range state.Parts {
-			if part.IsComplete {
-				model.RegisterWorker(part.ID, part.Start, part.End)
-				model.UpdateWorkerProgress(part.ID, part.End-part.Start+1)
-				continue
-			}
-
-			wg.Add(1)
-			go func(p *Part) {
-				defer wg.Done()
-
-				err := downloadPartWithRetry(url, p, model)
-				if err != nil {
-					errMu.Lock()
-					if downloadErr == nil {
-						downloadErr = err
-					}
-					// check if link expired
-					if errors.Is(err, ErrLinkExpired) {
-						downloadErr = err
-					}
-					errMu.Unlock()
-				} else {
-					p.IsComplete = true
-				}
-			}(part)
-		}
-
-		wg.Wait()
-		SaveState(statePath, state)
-
-		if downloadErr != nil {
-			program.Send(ui.ErrorMsg{Error: downloadErr})
-			return
-		}
-
-		err := mergeParts(outFileName, numWorkers)
-		if err != nil {
-			program.Send(ui.ErrorMsg{Error: fmt.Errorf("merge failed: %v", err)})
-			return
-		}
-
-		os.Remove(outFileName + ".json")
-		for i := 0; i < numWorkers; i++ {
-			os.Remove(fmt.Sprintf("part_%d.tmp", i))
-		}
-
-		program.Send(ui.DoneMsg{})
+		RunDownload(config, state, model, program)
 	}()
 
 	if _, err := program.Run(); err != nil {
@@ -204,32 +122,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	switch model.GetQuitMode() {
+	handleQuitMode(model.GetQuitMode(), state, config.NumWorkers)
+}
+
+func handleQuitMode(mode ui.QuitMode, state *DownloadState, numWorkers int) {
+	switch mode {
 	case ui.QuitModeClean:
-		// delete tmp files and session state
-		os.Remove(statePath + ".json")
-		for i := 0; i < numWorkers; i++ {
-			os.Remove(fmt.Sprintf("part_%d.tmp", i))
-		}
+		util.CleanupSession(state.Filename, numWorkers)
 		fmt.Println("Download cancelled.")
 
 	case ui.QuitModeSave:
-		// Save state, keep tmp files for resume
-		SaveState(statePath, state)
-		fmt.Printf("Download paused. Resume with: adam resume %s\n", outFileName)
+		SaveState(util.GetStatePath(state.Filename), state)
+		fmt.Printf("Download paused. Resume with: adam resume %s\n", state.Filename)
 	}
 }
 
-func getStatePath(filename string) string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		configDir = home
-	}
+func printHelp() {
+	fmt.Println(`Adam - A fast download manager with resume support
 
-	dir := filepath.Join(configDir, "adam")
+Usage:
+  adam <url>                   Start a new download
+  adam resume <filename>       Resume a paused download
+  adam update <file> <url>     Update the URL for a paused download
+  adam ls                      List all download sessions
+  adam help                    Show this help message
 
-	os.MkdirAll(dir, 0755)
-
-	return filepath.Join(dir, filename)
+Keyboard shortcuts (during download):
+  p     Pause download
+  r     Resume download
+  s     Save progress and quit
+  q     Cancel and quit`)
 }

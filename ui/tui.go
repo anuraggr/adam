@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"adam/util"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -142,7 +144,7 @@ func (m *Model) recalculateGrid() {
 	}
 
 	m.chunks = m.rows * m.cols
-	m.chunkStatus = make([]bool, m.chunks) //slice of size chunks
+	m.chunkStatus = make([]bool, m.chunks)
 }
 
 func (m *Model) updateChunksFromWorkers() {
@@ -256,7 +258,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.err = msg.Error
 		m.mu.Unlock()
-		return m, nil //so we should not quit imediately. error needs to be seen by user right
+		return m, nil
 
 	case TickMsg:
 		m.updateChunksFromWorkers()
@@ -319,9 +321,9 @@ func (m *Model) View() string {
 	elapsed := time.Since(startTime).Round(time.Second)
 
 	percentStr := PercentStyle.Render(fmt.Sprintf("%.1f%%", percent))
-	speedStr := SpeedStyle.Render(formatSpeed(speed))
-	receivedStr := formatBytes(received)
-	totalStr := formatBytes(bytesTotal)
+	speedStr := SpeedStyle.Render(util.FormatSpeed(speed))
+	receivedStr := util.FormatBytes(received)
+	totalStr := util.FormatBytes(bytesTotal)
 	timeRemainingStr := formatDuration(m.timeRemaining)
 
 	stats := StatsStyle.Render(fmt.Sprintf(
@@ -348,39 +350,6 @@ func (m *Model) View() string {
 	}
 
 	return b.String()
-}
-
-func formatSpeed(bps float64) string {
-	if bps == 0 {
-		return "-- B/s"
-	}
-
-	units := []string{"B/s", "KB/s", "MB/s", "GB/s"}
-	unitIndex := 0
-
-	for bps >= 1024 && unitIndex < len(units)-1 {
-		bps /= 1024
-		unitIndex++
-	}
-
-	return fmt.Sprintf("%.1f %s", bps, units[unitIndex])
-}
-
-func formatBytes(bytes int64) string {
-	if bytes == 0 {
-		return "0 B"
-	}
-
-	units := []string{"B", "KB", "MB", "GB", "TB"}
-	unitIndex := 0
-	size := float64(bytes)
-
-	for size >= 1024 && unitIndex < len(units)-1 {
-		size /= 1024
-		unitIndex++
-	}
-
-	return fmt.Sprintf("%.1f %s", size, units[unitIndex])
 }
 
 func formatDuration(d time.Duration) string {

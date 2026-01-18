@@ -5,11 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"adam/util"
 )
 
 func listSessions() {
-	configDir, _ := os.UserConfigDir()
-	adamDir := filepath.Join(configDir, "adam")
+	adamDir := util.GetConfigDir()
 
 	files, err := os.ReadDir(adamDir)
 	if err != nil {
@@ -33,8 +34,6 @@ func listSessions() {
 		}
 	}
 
-	// maybe sort by newest. might need lastUpdated field in json
-
 	for i, state := range sessions {
 		var downloaded int64 = 0
 		for _, p := range state.Parts {
@@ -53,16 +52,16 @@ func listSessions() {
 
 		fmt.Printf("%-3d | %-25s | %-10s | %-8s | %s\n",
 			i+1,
-			truncateString(state.Filename, 25),
-			simpleFormatBytes(state.TotalSize),
+			util.TruncateString(state.Filename, 25),
+			util.FormatBytes(state.TotalSize),
 			status,
-			filepath.Base(state.Filename), // using filename as id for now
+			filepath.Base(state.Filename),
 		)
 	}
 }
 
 func updateSessionUrl(targetFile string, newUrl string) {
-	statePath := getStatePath(targetFile)
+	statePath := util.GetStatePath(targetFile)
 
 	if _, err := os.Stat(statePath + ".json"); os.IsNotExist(err) {
 		fmt.Printf("Error: Could not find session for '%s'\n", targetFile)
@@ -77,8 +76,8 @@ func updateSessionUrl(targetFile string, newUrl string) {
 	}
 
 	fmt.Printf("Updating URL for %s...\n", state.Filename)
-	fmt.Printf("OLD: %s\n", truncateString(state.URL, 50))
-	fmt.Printf("NEW: %s\n", truncateString(newUrl, 50))
+	fmt.Printf("OLD: %s\n", util.TruncateString(state.URL, 50))
+	fmt.Printf("NEW: %s\n", util.TruncateString(newUrl, 50))
 
 	state.URL = newUrl
 	err = SaveState(statePath, state)
@@ -87,24 +86,4 @@ func updateSessionUrl(targetFile string, newUrl string) {
 	} else {
 		fmt.Println("Success! Run 'adam resume " + targetFile + "' to continue.")
 	}
-}
-
-func truncateString(str string, num int) string {
-	if len(str) > num {
-		return str[0:num-3] + "..."
-	}
-	return str
-}
-
-func simpleFormatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
