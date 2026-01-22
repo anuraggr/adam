@@ -17,6 +17,10 @@ type ErrorMsg struct {
 	Error error
 }
 
+type DebugMsg struct {
+	Message string
+}
+
 type TickMsg struct{}
 
 type QuitMode int

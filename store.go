@@ -11,6 +11,9 @@ type Part struct {
 	End           int64 `json:"end"`
 	CurrentOffset int64 `json:"current_offset"`
 	IsComplete    bool  `json:"is_complete"`
+	// below fiels are non persistant
+	Restarts  int   `json:"-"`
+	LastBytes int64 `json:"-"`
 }
 
 type DownloadState struct {

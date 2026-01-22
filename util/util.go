@@ -82,7 +82,11 @@ func MoveToComplete(filename string) error {
 }
 
 func CleanupSession(filename string, numWorkers int) {
-	// Move the state file to complete directory instead of deleting
+	os.Remove(GetStatePath(filename) + ".json")
+	CleanupTempFiles(numWorkers)
+}
+
+func CompleteSession(filename string, numWorkers int) {
 	MoveToComplete(filename)
 	CleanupTempFiles(numWorkers)
 }

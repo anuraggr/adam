@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,20 +13,21 @@ import (
 )
 
 var ErrLinkExpired = errors.New("link expired")
+var ErrWorkerCancelled = errors.New("worker cancelled")
 
-func downloadPartWithRetry(url string, part *Part, model *ui.Model, maxRetries int) error {
+func downloadPartWithRetry(ctx context.Context, url string, part *Part, model *ui.Model, maxRetries int) error {
 	filename := fmt.Sprintf("part_%d.tmp", part.ID)
 
 	model.RegisterWorker(part.ID, part.Start, part.End)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := downloadChunk(url, part, filename, model)
+		err := downloadChunk(ctx, url, part, filename, model)
 		if err == nil {
 			return nil
 		}
 
-		// don't retry if link expired
-		if errors.Is(err, ErrLinkExpired) {
+		// don't retry if link expired or context cancelled
+		if errors.Is(err, ErrLinkExpired) || errors.Is(err, ErrWorkerCancelled) {
 			return err
 		}
 
@@ -37,7 +39,7 @@ func downloadPartWithRetry(url string, part *Part, model *ui.Model, maxRetries i
 	return fmt.Errorf("worker %d failed after %d retries", part.ID, maxRetries)
 }
 
-func downloadChunk(url string, part *Part, filename string, model *ui.Model) error {
+func downloadChunk(ctx context.Context, url string, part *Part, filename string, model *ui.Model) error {
 	mode := os.O_CREATE | os.O_WRONLY
 	startByte := part.Start
 
@@ -72,7 +74,7 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 		}
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -82,6 +84,9 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ErrWorkerCancelled
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -102,6 +107,13 @@ func downloadChunk(url string, part *Part, filename string, model *ui.Model) err
 
 	buf := make([]byte, 32*1024) // 32kb buffer
 	for {
+		// check if cancelled
+		select {
+		case <-ctx.Done():
+			return ErrWorkerCancelled
+		default:
+		}
+
 		// we have to check if paused before each read
 		model.WaitIfPaused()
 

@@ -37,6 +37,9 @@ type Model struct {
 	pauseCh  chan struct{}
 	pauseMu  sync.RWMutex
 	quitMode QuitMode
+
+	// Debug
+	debugMessages []string
 }
 
 type WorkerProgress struct {
@@ -263,6 +266,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		m.updateChunksFromWorkers()
 		return m, tickCmd()
+
+	case DebugMsg:
+		m.mu.Lock()
+		m.debugMessages = append(m.debugMessages, msg.Message)
+		// Keep only last 3 messages
+		if len(m.debugMessages) > 3 {
+			m.debugMessages = m.debugMessages[len(m.debugMessages)-3:]
+		}
+		m.mu.Unlock()
+		return m, nil
 	}
 
 	return m, nil
@@ -348,6 +361,16 @@ func (m *Model) View() string {
 	} else {
 		b.WriteString("\nPress 'p' to pause │ 's' to save & quit │ 'q' to cancel\n")
 	}
+
+	// Debug messages
+	m.mu.RLock()
+	if len(m.debugMessages) > 0 {
+		b.WriteString("\n--- Debug ---\n")
+		for _, msg := range m.debugMessages {
+			b.WriteString(fmt.Sprintf("🔧 %s\n", msg))
+		}
+	}
+	m.mu.RUnlock()
 
 	return b.String()
 }
