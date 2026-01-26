@@ -105,7 +105,10 @@ func downloadChunk(ctx context.Context, url string, part *Part, filename string,
 	}
 	defer file.Close()
 
-	buf := make([]byte, 32*1024) // 32kb buffer
+	//Increased buffer size from 32kb to 128kb to
+	//decrease the number of syscalls
+	buf := make([]byte, 128*1024) // 128kb buffer
+
 	for {
 		// check if cancelled
 		select {
