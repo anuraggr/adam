@@ -74,7 +74,7 @@ func main() {
 		}
 		url = state.URL
 		totalSize = state.TotalSize
-		config.NumWorkers = len(state.Parts)
+		config.numWorkers = len(state.Parts)
 		fmt.Printf("Resuming download: %s\n", outFileName)
 	} else {
 		// fresh download
@@ -87,7 +87,7 @@ func main() {
 		totalSize, err = checkServerSupport(url)
 		if err == ErrNoRangeSupport {
 			fmt.Println("Server does not support range requests. Falling back to a single worker.")
-			config.NumWorkers = 1
+			config.numWorkers = 1
 			err = nil
 		}
 		if err != nil {
@@ -99,14 +99,14 @@ func main() {
 			URL:       url,
 			Filename:  outFileName,
 			TotalSize: totalSize,
-			Parts:     make([]*Part, config.NumWorkers),
+			Parts:     make([]*Part, config.numWorkers),
 		}
 
-		chunkSize := totalSize / int64(config.NumWorkers)
-		for i := 0; i < config.NumWorkers; i++ {
+		chunkSize := totalSize / int64(config.numWorkers)
+		for i := 0; i < config.numWorkers; i++ {
 			start := int64(i) * chunkSize
 			end := start + chunkSize - 1
-			if i == config.NumWorkers-1 {
+			if i == config.numWorkers-1 {
 				end = totalSize - 1
 			}
 
@@ -131,7 +131,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	handleQuitMode(model.GetQuitMode(), state, config.NumWorkers)
+	handleQuitMode(model.GetQuitMode(), state, config.numWorkers)
 }
 
 func handleQuitMode(mode ui.QuitMode, state *DownloadState, numWorkers int) {

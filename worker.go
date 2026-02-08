@@ -15,7 +15,7 @@ import (
 var ErrLinkExpired = errors.New("link expired")
 var ErrWorkerCancelled = errors.New("worker cancelled")
 
-func downloadPartWithRetry(ctx context.Context, url string, part *Part, model *ui.Model, maxRetries int) error {
+func tryDownload(ctx context.Context, url string, part *Part, model *ui.Model, maxRetries int) error {
 	filename := fmt.Sprintf("part_%d.tmp", part.ID)
 
 	model.RegisterWorker(part.ID, part.Start, part.End)

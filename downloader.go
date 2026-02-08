@@ -13,22 +13,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const (
-	speedCheckInterval     = 3 * time.Second
-	minMeanSpeedForRestart = 100 * 1024 // 100 KB/s
-	slowWorkerThreshold    = 0.3
-	maxWorkerRestarts      = 5
-)
-
 type DownloadConfig struct {
-	NumWorkers int
-	MaxRetries int
+	numWorkers             int
+	maxRetries             int
+	speedCheckInterval     time.Duration
+	minMeanSpeedForRestart float64
+	slowWorkerThreshold    float64
+	maxWorkerRestarts      int
 }
 
 func DefaultConfig() DownloadConfig {
 	return DownloadConfig{
-		NumWorkers: 8,
-		MaxRetries: 3,
+		numWorkers:             8,
+		maxRetries:             3,
+		speedCheckInterval:     3 * time.Second,
+		minMeanSpeedForRestart: 100 * 1024,
+		slowWorkerThreshold:    0.3,
+		maxWorkerRestarts:      5,
 	}
 }
 
@@ -80,7 +81,7 @@ func RunDownload(config DownloadConfig, state *DownloadState, model *ui.Model, p
 
 	// worker performance routine
 	go func() {
-		ticker := time.NewTicker(speedCheckInterval)
+		ticker := time.NewTicker(config.speedCheckInterval)
 		defer ticker.Stop()
 
 		for {
@@ -138,7 +139,7 @@ func RunDownload(config DownloadConfig, state *DownloadState, model *ui.Model, p
 func runWorker(ctx context.Context, url string, part *Part, model *ui.Model, config DownloadConfig, wg *sync.WaitGroup, downloadErr *error, errMu *sync.Mutex) {
 	defer wg.Done()
 
-	err := downloadPartWithRetry(ctx, url, part, model, config.MaxRetries)
+	err := tryDownload(ctx, url, part, model, config.maxRetries)
 	if err != nil {
 		if errors.Is(err, ErrWorkerCancelled) {
 			return
@@ -166,7 +167,7 @@ func checkAndRestartSlowWorkers(state *DownloadState, workerCtx map[int]*workerC
 			continue
 		}
 
-		speed := float64(part.CurrentOffset-part.LastBytes) / speedCheckInterval.Seconds()
+		speed := float64(part.CurrentOffset-part.LastBytes) / config.speedCheckInterval.Seconds()
 		part.LastBytes = part.CurrentOffset
 
 		if speed >= 0 {
@@ -183,16 +184,16 @@ func checkAndRestartSlowWorkers(state *DownloadState, workerCtx map[int]*workerC
 	meanSpeed := totalSpeed / float64(len(activeWorkers))
 
 	// we only restart if mean speed is above threshold
-	if meanSpeed < minMeanSpeedForRestart {
+	if meanSpeed < config.minMeanSpeedForRestart {
 		return
 	}
 
-	threshold := meanSpeed * slowWorkerThreshold
+	threshold := meanSpeed * config.slowWorkerThreshold
 
 	program.Send(ui.DebugMsg{Message: fmt.Sprintf("Speed check: mean=%.1f KB/s, threshold=%.1f KB/s", meanSpeed/1024, threshold/1024)})
 
 	for i, part := range activeWorkers {
-		if speeds[i] < threshold && part.Restarts < maxWorkerRestarts {
+		if speeds[i] < threshold && part.Restarts < config.maxWorkerRestarts {
 			// cancel and restart this worker
 			ctxMu.RLock()
 			ctrl := workerCtx[part.ID]
@@ -204,7 +205,7 @@ func checkAndRestartSlowWorkers(state *DownloadState, workerCtx map[int]*workerC
 
 			part.Restarts++
 
-			program.Send(ui.DebugMsg{Message: fmt.Sprintf("Restarting worker %d (%.1f KB/s < %.1f KB/s) [restart %d/%d]", part.ID, speeds[i]/1024, threshold/1024, part.Restarts, maxWorkerRestarts)})
+			program.Send(ui.DebugMsg{Message: fmt.Sprintf("Restarting worker %d (%.1f KB/s < %.1f KB/s) [restart %d/%d]", part.ID, speeds[i]/1024, threshold/1024, part.Restarts, config.maxWorkerRestarts)})
 
 			// start new worker
 			ctx, cancel := context.WithCancel(context.Background())
