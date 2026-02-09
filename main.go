@@ -13,11 +13,12 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: adam <url> | adam resume <filename> | adam ls")
+		fmt.Println("Usage: adam <url> [-o <name>] | adam resume <filename> | adam ls")
 		return
 	}
 	command := os.Args[1]
 	var url string
+	var customName string
 	var isResume bool
 
 	switch command {
@@ -27,7 +28,7 @@ func main() {
 			switch os.Args[2] {
 			case "-c", "--complete":
 				filter = "complete"
-			case "-o", "--ongoing":
+			case "--ongoing":
 				filter = "ongoing"
 			}
 		}
@@ -55,6 +56,13 @@ func main() {
 
 	default:
 		url = os.Args[1]
+		// Parse -o flag for custom output name
+		for i := 2; i < len(os.Args); i++ {
+			if os.Args[i] == "-o" && i+1 < len(os.Args) {
+				customName = os.Args[i+1]
+				break
+			}
+		}
 	}
 
 	config := DefaultConfig()
@@ -78,7 +86,11 @@ func main() {
 		fmt.Printf("Resuming download: %s\n", outFileName)
 	} else {
 		// fresh download
-		outFileName = filepath.Base(url)
+		if customName != "" {
+			outFileName = customName
+		} else {
+			outFileName = filepath.Base(url)
+		}
 		statePath := util.GetStatePath(outFileName)
 
 		// remove any existing state and tmp files for this file
@@ -151,10 +163,11 @@ func printHelp() {
 
 Usage:
   adam <url>                   Start a new download
+  adam <url> -o <name>         Download with custom filename
   adam resume <filename>       Resume a paused download
   adam update <file> <url>     Update the URL for a paused download
   adam ls                      List all download sessions
-  adam ls -o                   List ongoing downloads only
+  adam ls --ongoing            List ongoing downloads only
   adam ls -c                   List completed downloads only
   adam help                    Show this help message
 

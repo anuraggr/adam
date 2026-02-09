@@ -14,7 +14,7 @@ func mergeParts(filename string, parts int) error {
 	defer destFile.Close()
 
 	for i := 0; i < parts; i++ {
-		partFileName := fmt.Sprintf("part_%d.tmp", i)
+		partFileName := fmt.Sprintf("%s.part_%d.tmp", filename, i)
 
 		partFile, err := os.Open(partFileName)
 		if err != nil {

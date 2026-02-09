@@ -68,9 +68,9 @@ func GetStatePath(filename string) string {
 	return filepath.Join(GetOngoingDir(), filename)
 }
 
-func CleanupTempFiles(numWorkers int) {
+func CleanupTempFiles(baseFilename string, numWorkers int) {
 	for i := 0; i < numWorkers; i++ {
-		os.Remove(fmt.Sprintf("part_%d.tmp", i))
+		os.Remove(fmt.Sprintf("%s.part_%d.tmp", baseFilename, i))
 	}
 }
 
@@ -83,12 +83,12 @@ func MoveToComplete(filename string) error {
 
 func CleanupSession(filename string, numWorkers int) {
 	os.Remove(GetStatePath(filename) + ".json")
-	CleanupTempFiles(numWorkers)
+	CleanupTempFiles(filename, numWorkers)
 }
 
 func CompleteSession(filename string, numWorkers int) {
 	MoveToComplete(filename)
-	CleanupTempFiles(numWorkers)
+	CleanupTempFiles(filename, numWorkers)
 }
 
 func TruncateString(str string, maxLen int) string {

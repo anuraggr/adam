@@ -111,7 +111,7 @@ func RunDownload(config DownloadConfig, state *DownloadState, model *ui.Model, p
 		ctxMu.Unlock()
 
 		wg.Add(1)
-		go runWorker(ctx, state.URL, part, model, config, &wg, &downloadErr, &errMu)
+		go runWorker(ctx, state.URL, part, state.Filename, model, config, &wg, &downloadErr, &errMu)
 	}
 
 	wg.Wait()
@@ -136,10 +136,10 @@ func RunDownload(config DownloadConfig, state *DownloadState, model *ui.Model, p
 	return nil
 }
 
-func runWorker(ctx context.Context, url string, part *Part, model *ui.Model, config DownloadConfig, wg *sync.WaitGroup, downloadErr *error, errMu *sync.Mutex) {
+func runWorker(ctx context.Context, url string, part *Part, baseFilename string, model *ui.Model, config DownloadConfig, wg *sync.WaitGroup, downloadErr *error, errMu *sync.Mutex) {
 	defer wg.Done()
 
-	err := tryDownload(ctx, url, part, model, config.maxRetries)
+	err := tryDownload(ctx, url, part, baseFilename, model, config.maxRetries)
 	if err != nil {
 		if errors.Is(err, ErrWorkerCancelled) {
 			return
@@ -214,7 +214,7 @@ func checkAndRestartSlowWorkers(state *DownloadState, workerCtx map[int]*workerC
 			ctxMu.Unlock()
 
 			wg.Add(1)
-			go runWorker(ctx, state.URL, part, model, config, wg, downloadErr, errMu)
+			go runWorker(ctx, state.URL, part, state.Filename, model, config, wg, downloadErr, errMu)
 		}
 	}
 }
